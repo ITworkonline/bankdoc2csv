@@ -17,57 +17,51 @@ def extract_transactions_from_pdf(pdf_path):
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
             text = page.extract_text()
-            
-            # Split the text into lines
+            if not text:
+                continue
             lines = text.split('\n')
-            
-            # Process each line
             for line in lines:
-                # Skip empty lines and headers
                 if not line.strip() or 'Beginning balance' in line or 'Ending balance' in line:
                     continue
-                
-                # Try to match transaction patterns
-                # Looking for date at the start of the line
+                # 只匹配行首日期
                 date_pattern = r'^(\d{1,2}/\d{1,2})'
-                date_match = re.search(date_pattern, line)
-                
-                if date_match:
-                    # Extract date
-                    date_str = date_match.group(1)
-                    try:
-                        # Add current year (this might need adjustment for statements spanning year-end)
-                        current_year = datetime.now().year
-                        date = datetime.strptime(f"{date_str}/{current_year}", "%m/%d/%Y")
-                        
-                        # Extract amount - look for numbers with optional decimals and commas
-                        amount_pattern = r'([\d,]+\.\d{2})'
-                        amounts = re.findall(amount_pattern, line)
-                        
-                        if amounts:
-                            amount = float(amounts[-1].replace(',', ''))
-                            
-                            # Determine if it's a deposit or withdrawal based on context
-                            is_deposit = any(keyword in line.lower() for keyword in 
-                                          ['deposit', 'credit', 'refund', 'transfer in'])
-                            
-                            # If not explicitly a deposit, treat as withdrawal
-                            if not is_deposit:
-                                amount = -amount
-                            
-                            # Get description - everything between date and amount
-                            description = line.replace(date_str, '', 1)
-                            description = re.sub(r'[\d,]+\.\d{2}', '', description).strip()
-                            description = re.sub(r'\s+', ' ', description)
-                            
-                            transactions.append({
-                                'Date': date,
-                                'Description': description,
-                                'Amount': amount
-                            })
-                    except ValueError:
-                        continue
-    
+                date_match = re.match(date_pattern, line)
+                if not date_match:
+                    continue
+                date_str = date_match.group(1)
+                try:
+                    current_year = datetime.now().year
+                    date = datetime.strptime(f"{date_str}/{current_year}", "%m/%d/%Y")
+                except ValueError:
+                    continue
+                # 去掉日期部分
+                rest = line[len(date_str):].strip()
+                # 提取所有金额
+                amount_pattern = r'([\d,]+\.\d{2})'
+                amounts = re.findall(amount_pattern, rest)
+                if not amounts:
+                    continue
+                # 只保留前两个金额（一般第一个是收入/支出，第二个是余额）
+                if len(amounts) >= 2:
+                    amount_str = amounts[0]  # 只取第一个金额
+                else:
+                    amount_str = amounts[0]
+                # 提取描述（去掉所有金额部分，只保留前面的内容）
+                desc_split = re.split(amount_pattern, rest, maxsplit=1)
+                description = desc_split[0].strip() if desc_split else rest
+                # 判断正负
+                try:
+                    amount = float(amount_str.replace(',', ''))
+                    is_deposit = any(keyword in description.lower() for keyword in ['deposit', 'credit', 'refund', 'transfer in'])
+                    if not is_deposit:
+                        amount = -amount
+                except Exception:
+                    continue
+                transactions.append({
+                    'Date': date,
+                    'Description': description,
+                    'Amount': amount
+                })
     return transactions
 
 def process_pdf_folder(input_folder, output_file):
